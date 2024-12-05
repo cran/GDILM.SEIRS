@@ -1,0 +1,13 @@
+6d015bd4a9ea789ac08e7fadeab48f2f *DESCRIPTION
+4f0facc50189bc58f81c2dcbb8531505 *LICENSE
+82df24b33a206a297810f1f0e9afaa6b *NAMESPACE
+2c0b152b5f26450778798a5bba47e303 *R/GDILM_SEIRS_Par_Est.R
+81306397f4fa9512653ce8d7968d0a7f *R/GDILM_SEIRS_Sim_Par_Est.R
+f63f047305ebec129a655edad240fc30 *data/adjacency_matrix.rda
+2a270c73d471dc1318405a992c42dc6a *data/data.rda
+f4fc628166c948973545cda721191727 *man/GDILM_SEIRS_Par_Est.Rd
+d0a8ce2c54d668d8119fc22be40a549f *man/GDILM_SEIRS_Sim_Par_Est.Rd
+5c3f3e9c03c3135b67d4a58befd0a2f8 *man/data.Rd
+32387e0479a5e272ff60f2dad7da92f0 *tests/testthat.R
+31f6fc462022bcee7409afde7506249c *tests/testthat/test-GDILM_SEIRS_Par_Est.R
+e7b84390f45e226ac63cb8766d94ae39 *tests/testthat/test-GDILM_SEIRS_Sim_Par_Est.R
