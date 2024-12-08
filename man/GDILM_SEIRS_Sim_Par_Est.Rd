@@ -20,7 +20,8 @@ GDILM_SEIRS_Sim_Par_Est(
   ReInfFraction,
   InfPrd,
   IncPrd,
-  NIterMC
+  NIterMC,
+  NIterMCECM
 )
 }
 \arguments{
@@ -55,6 +56,8 @@ GDILM_SEIRS_Sim_Par_Est(
 \item{IncPrd}{Incubation period that can be obtained either from the literature or by fitting an SEIRS model to the data}
 
 \item{NIterMC}{Number of MCMC iterations}
+
+\item{NIterMCECM}{Number of MCECM iterations}
 }
 \value{
 \code{alphaS} Estimate of alpha S
@@ -80,7 +83,7 @@ This function conducts a simulation study for the Geographically Dependent Indiv
 }
 \examples{
 \donttest{
-GDILM_SEIRS_Sim_Par_Est(3,3,8,30,0.7, 0.5, -1, 2.5, 0,30, 50,0.5,0.5, 2, 3, 10)
+GDILM_SEIRS_Sim_Par_Est(3,3,8,30,0.7, 0.5, -1, 2.5, 0,30, 50,0.5,0.5, 2, 3, 10, 2)
 }
 
 }

@@ -17,6 +17,7 @@
 #' @param InfPrd Infectious period that can be obtained either from the literature or by fitting an SEIRS model to the data
 #' @param IncPrd Incubation period that can be obtained either from the literature or by fitting an SEIRS model to the data
 #' @param NIterMC Number of MCMC iterations
+#' @param NIterMCECM Number of MCECM iterations
 #' @return
 #'
 #'   `alphaS` Estimate of alpha S
@@ -44,10 +45,10 @@
 #' @import stats
 #' @examples
 #' \donttest{
-#' GDILM_SEIRS_Sim_Par_Est(3,3,8,30,0.7, 0.5, -1, 2.5, 0,30, 50,0.5,0.5, 2, 3, 10)
+#' GDILM_SEIRS_Sim_Par_Est(3,3,8,30,0.7, 0.5, -1, 2.5, 0,30, 50,0.5,0.5, 2, 3, 10, 2)
 #' }
 #'
-  GDILM_SEIRS_Sim_Par_Est=function(GridDim1,GridDim2,NPostPerGrid,MaxTimePand,tau0, lambda0, alphaS0, delta0, alphaT0,PopMin, PopMax,InfFraction,ReInfFraction, InfPrd, IncPrd, NIterMC){
+  GDILM_SEIRS_Sim_Par_Est=function(GridDim1,GridDim2,NPostPerGrid,MaxTimePand,tau0, lambda0, alphaS0, delta0, alphaT0,PopMin, PopMax,InfFraction,ReInfFraction, InfPrd, IncPrd, NIterMC, NIterMCECM){
  if(lambda0>1) stop("The spatial dependence parameter should be restricted to a range between 0 and 1.")
  if(lambda0==0) stop("Absence of spatial dependence: This model is designed for scenarios where spatial dependence is present.")
  if(delta0<0) stop("The spatial decay parameter must be greater than zero.")
@@ -575,6 +576,12 @@ mean3=function(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf
       }
       InfY5=apply(Y5,c(1,2),sum)
       EndY5=SusYY1+InfYY3+InfY5
+
+      epsilon <- 1e-3
+      if (det(EndY5) < epsilon) {
+        EndY5 <- EndY5 + diag(epsilon, nrow(EndY5))
+      }
+
       EstBetaCovSus=BetaCovSus-solve(EndY5)%*%EndY3
 
       #################################BetaCovSusReInf##################################
@@ -675,6 +682,12 @@ mean3=function(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf
       }
       InfY5r=apply(Y5r,c(1,2),sum)
       EndY5r=SusYY1r+InfYY3r+InfY5r
+
+      epsilon <- 1e-3
+      if (det(EndY5r) < epsilon) {
+        EndY5r <- EndY5r + diag(epsilon, nrow(EndY5r))
+      }
+
       EstBetaCovSusReInf=BetaCovSusReInf-solve(EndY5r)%*%EndY3r
 
       ######################################## alphaT #######################################
@@ -958,7 +971,6 @@ mean3=function(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf
 
 
     OUT2=list()
-    ss=5
     LA=numeric()
     Loglik=function(NLableGrid,Pos1,Dist,alphaS,delta,lambda1,tau1,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT){
 
@@ -1067,44 +1079,65 @@ mean3=function(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf
     Pos1
 
 
-    min_LA = Inf
+    ########################################################################
+    ########################################################################
+    ########################################################################
+    E1 <- list()
+    AIC <- numeric()
+    mes <- numeric()
 
-    repeat {
-      ss = ss + 1
-      est = estfun(NLableGrid, Dist, alphaS, delta, lambda1, tau1, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)
+    tolerance <- 0.1
 
-      alphaS = est$alphaS
-      BetaCovInf = est$BetaCovInf
-      BetaCovSus = est$BetaCovSus
-      BetaCovSusReInf = est$BetaCovSusReInf
-      delta = est$delta
-      lambda1 = est$lambda1
-      tau1 = est$tau1
-      alphaT = est$alphaT
-      Uhat = est$Uhat
-      Pos = est$Pos
 
-      LA[ss] = Loglik(NLableGrid, Pos, Dist, alphaS, delta, lambda1, tau1, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)
+    for (ss in 1:NIterMCECM) {
 
-      AIC = -2*LA[ss]+11
-      out1 = list(
+      est <- estfun(NLableGrid, Dist, alphaS, delta, lambda1, tau1, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)
+
+      alphaS <- est$alphaS
+      BetaCovInf <- est$BetaCovInf
+      BetaCovSus <- est$BetaCovSus
+      BetaCovSusReInf <- est$BetaCovSusReInf
+      delta <- est$delta
+      lambda1 <- est$lambda1
+      tau1 <- est$tau1
+      alphaT <- est$alphaT
+      Uhat <- est$Uhat
+      Pos <- est$Pos
+
+      LA[ss] <- Loglik(NLableGrid, Pos, Dist, alphaS, delta, lambda1, tau1, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)
+
+      AIC[ss] <- -2 * LA[ss] + 11
+
+      out1 <- list(
         alphaS = alphaS,
         BetaCovInf = BetaCovInf,
         BetaCovSus = BetaCovSus,
-        BetaCovSusReInf= BetaCovSusReInf,
-        alphaT= alphaT,
+        BetaCovSusReInf = BetaCovSusReInf,
+        alphaT = alphaT,
         delta = delta,
         tau1 = tau1,
         lambda1 = lambda1,
-        AIC=AIC
+        AIC = AIC[ss]
       )
-      if (ss > 1 && !is.na(LA[ss]) && !is.na(LA[ss- 1]) && abs((LA[ss] - LA[ss - 1]) / LA[ss- 1]) <= 0.99) {
 
+      E1[[ss]] <- c(alphaS, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT, delta, tau1, lambda1)
+
+      if (ss > 1) {
+        mes[ss] <- sqrt(sum((E1[[ss]] - E1[[ss-1]])^2))
+      } else {
+        mes[ss] <- Inf
+      }
+
+      if (mes[ss] < tolerance) {
+        message("MCECM Converged at iteration ", ss, " with parameter change: ", mes[ss])
         break
       }
+
+      if (ss %% 10 == 0) {
+        message("Iteration ", ss, ": Parameter change = ", mes[ss])
+      }
     }
+
     out1
+
   }
-
-
-

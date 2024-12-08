@@ -17,7 +17,8 @@ GDILM_SEIRS_Par_Est(
   alphaT0,
   InfPrd,
   IncPrd,
-  NIterMC
+  NIterMC,
+  NIterMCECM
 )
 }
 \arguments{
@@ -46,6 +47,8 @@ GDILM_SEIRS_Par_Est(
 \item{IncPrd}{Incubation period that can be obtained either from the literature or by fitting an SEIRS model to the data}
 
 \item{NIterMC}{Number of MCMC iterations}
+
+\item{NIterMCECM}{Number of MCECM iterations}
 }
 \value{
 \code{alphaS} Estimate of alpha S
@@ -73,7 +76,7 @@ This function applies the Geographically Dependent Individual Level Model (GDILM
 \donttest{
 data(data)
 data(adjacency_matrix)
-GDILM_SEIRS_Par_Est(data,adjacency_matrix,2,2,2,0.8, 0.5, -1, 2.5, 0, 2, 3, 20)
+GDILM_SEIRS_Par_Est(data,adjacency_matrix,2,2,2,0.5, 0.5, 1, 2, 1, 1, 1, 20, 2)
 }
 
 }
