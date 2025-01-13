@@ -45,7 +45,7 @@
 #' @import stats
 #' @examples
 #' \donttest{
-#' GDILM_SEIRS_Sim_Par_Est(3,3,8,30,0.7, 0.5, -1, 2.5, 0,30, 50,0.5,0.5, 2, 3, 10, 2)
+#' GDILM_SEIRS_Sim_Par_Est(5,5,10,30,0.7, 0.5, -1, 2.5, 0,40, 50,0.3,0.6, 3, 3, 10, 3)
 #' }
 #'
   GDILM_SEIRS_Sim_Par_Est=function(GridDim1,GridDim2,NPostPerGrid,MaxTimePand,tau0, lambda0, alphaS0, delta0, alphaT0,PopMin, PopMax,InfFraction,ReInfFraction, InfPrd, IncPrd, NIterMC, NIterMCECM){
@@ -117,13 +117,13 @@ Sigma0=solve(tau0^2*(lambda0*D+(1-lambda0)*I))
 phi=mvrnorm(1, mu, Sigma0, tol = 1e-6)
 ######################### Covaraites #######################
 CovSus=as.matrix(cbind(rnorm(NTotalGrid,0,1),runif(NTotalGrid,0,1)))
-CovSusReInf=as.matrix(cbind(rnorm(NTotalGrid,0,2),runif(NTotalGrid,0,2)))
+CovSusReInf=as.matrix(cbind(rnorm(NTotalGrid,0,4),runif(NTotalGrid,0,4)))
 CovInf=as.matrix(cbind(rnorm(NTotalpost,0,1),runif(NTotalpost,0,1)))
 DimCovInf=dim(CovInf)[2]
 DimCovSus=dim(CovSus)[2]
 DimCovSusReInf=dim(CovSusReInf)[2]
 BetaCovInf0=rep(1,DimCovInf)
-BetaCovSus0=rep(1,DimCovSus)
+BetaCovSus0=rep(2,DimCovSus)
 BetaCovSusReInf0=rep(1,DimCovSusReInf)
 ######################## Infected MaxTimePand #####################
 D1=c()
@@ -683,7 +683,7 @@ mean3=function(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf
       InfY5r=apply(Y5r,c(1,2),sum)
       EndY5r=SusYY1r+InfYY3r+InfY5r
 
-      epsilon <- 1e-3
+      epsilon <- 1e-1
       if (det(EndY5r) < epsilon) {
         EndY5r <- EndY5r + diag(epsilon, nrow(EndY5r))
       }
