@@ -45,7 +45,7 @@
 #' @import stats
 #' @examples
 #' \donttest{
-#' GDILM_SEIRS_Sim_Par_Est(5,5,10,30,0.7, 0.5, -1, 2.5, 0,40, 50,0.3,0.6, 3, 3, 10, 3)
+#' GDILM_SEIRS_Sim_Par_Est(5,5,10,30,0.7, 0.5, 1, 2.5, 0,40, 50,0.3,0.6, 5, 5, 10, 3)
 #' }
 #'
   GDILM_SEIRS_Sim_Par_Est=function(GridDim1,GridDim2,NPostPerGrid,MaxTimePand,tau0, lambda0, alphaS0, delta0, alphaT0,PopMin, PopMax,InfFraction,ReInfFraction, InfPrd, IncPrd, NIterMC, NIterMCECM){
@@ -116,8 +116,8 @@ mu=rep(0,NTotalGrid)
 Sigma0=solve(tau0^2*(lambda0*D+(1-lambda0)*I))
 phi=mvrnorm(1, mu, Sigma0, tol = 1e-6)
 ######################### Covaraites #######################
-CovSus=as.matrix(cbind(rnorm(NTotalGrid,0,1),runif(NTotalGrid,0,1)))
-CovSusReInf=as.matrix(cbind(rnorm(NTotalGrid,0,4),runif(NTotalGrid,0,4)))
+CovSus=as.matrix(cbind(rnorm(NTotalGrid,1,1),runif(NTotalGrid,1,2)))
+CovSusReInf=as.matrix(cbind(rnorm(NTotalGrid,2,0.1),runif(NTotalGrid,2,3)))
 CovInf=as.matrix(cbind(rnorm(NTotalpost,0,1),runif(NTotalpost,0,1)))
 DimCovInf=dim(CovInf)[2]
 DimCovSus=dim(CovSus)[2]

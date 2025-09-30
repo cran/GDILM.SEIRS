@@ -1,13 +1,13 @@
-820774d96b88c7701eae83a92ad1e236 *DESCRIPTION
+0d1fe0b3248a138aaec02324698884bb *DESCRIPTION
 4f0facc50189bc58f81c2dcbb8531505 *LICENSE
 82df24b33a206a297810f1f0e9afaa6b *NAMESPACE
 abda805152534c8f5dd0291033ef839e *R/GDILM_SEIRS_Par_Est.R
-310186d2e2f62436e2fdb5727d2b666a *R/GDILM_SEIRS_Sim_Par_Est.R
+f15efb90aa3e48bca0344c5d5030ac3b *R/GDILM_SEIRS_Sim_Par_Est.R
 f63f047305ebec129a655edad240fc30 *data/adjacency_matrix.rda
 2a270c73d471dc1318405a992c42dc6a *data/data.rda
 a313d42e1ca6a3e9641ccd31c39ab238 *man/GDILM_SEIRS_Par_Est.Rd
-0cde123f7783d86a9721f273fab589e7 *man/GDILM_SEIRS_Sim_Par_Est.Rd
+1ee89b3a93e4f6b1487e66d5d0d18908 *man/GDILM_SEIRS_Sim_Par_Est.Rd
 5c3f3e9c03c3135b67d4a58befd0a2f8 *man/data.Rd
 32387e0479a5e272ff60f2dad7da92f0 *tests/testthat.R
 0df25812735989446c389e21199eaf23 *tests/testthat/test-GDILM_SEIRS_Par_Est.R
-8957bf18e7a1d048b84dff1edb4bee0e *tests/testthat/test-GDILM_SEIRS_Sim_Par_Est.R
+d5fe149f15f61fccf3246e5776ba2d56 *tests/testthat/test-GDILM_SEIRS_Sim_Par_Est.R

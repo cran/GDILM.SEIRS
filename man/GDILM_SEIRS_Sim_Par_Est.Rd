@@ -83,7 +83,7 @@ This function conducts a simulation study for the Geographically Dependent Indiv
 }
 \examples{
 \donttest{
-GDILM_SEIRS_Sim_Par_Est(5,5,10,30,0.7, 0.5, -1, 2.5, 0,40, 50,0.3,0.6, 3, 3, 10, 3)
+GDILM_SEIRS_Sim_Par_Est(5,5,10,30,0.7, 0.5, 1, 2.5, 0,40, 50,0.3,0.6, 5, 5, 10, 3)
 }
 
 }
