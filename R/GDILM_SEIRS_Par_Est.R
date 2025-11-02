@@ -49,29 +49,24 @@
 #' }
 #'
 GDILM_SEIRS_Par_Est=function(data,adjacency_matrix,DimCovInf,DimCovSus,DimCovSusReInf,tau0, lambda0, alphaS0, delta0, alphaT0,InfPrd, IncPrd, NIterMC, NIterMCECM){
-if(lambda0>1) stop("The spatial dependence parameter should be restricted to a range between 0 and 1.")
-if(lambda0==0) stop("Absence of spatial dependence: This model is designed for scenarios where spatial dependence is present.")
-if(delta0<0) stop("The spatial decay parameter must be greater than zero.")
-if(NIterMC<2) stop("The number of iterations must exceed 2.")
-if(InfPrd<0) stop("The infectious period must be greater than zero.")
-if(IncPrd<0) stop("The incubation period must be greater than zero.")
-if(DimCovInf<0) stop("Dimensions of the individual infectivity covariate must be greater than zero.")
-if(DimCovSus<0) stop("Dimensions of the area-level susceptibility to initial infection covariate must be greater than zero.")
-if(DimCovSusReInf<0) stop("Dimensions of the area-level susceptibility to reinfection covariate must be greater than zero.")
+  if(lambda0>1) stop("The spatial dependence parameter should be restricted to a range between 0 and 1.")
+  if(lambda0==0) stop("Absence of spatial dependence: This model is designed for scenarios where spatial dependence is present.")
+  if(delta0<0) stop("The spatial decay parameter must be greater than zero.")
+  if(NIterMC<2) stop("The number of iterations must exceed 2.")
+  if(InfPrd<0) stop("The infectious period must be greater than zero.")
+  if(IncPrd<0) stop("The incubation period must be greater than zero.")
+  if(DimCovInf<0) stop("Dimensions of the individual infectivity covariate must be greater than zero.")
+  if(DimCovSus<0) stop("Dimensions of the area-level susceptibility to initial infection covariate must be greater than zero.")
+  if(DimCovSusReInf<0) stop("Dimensions of the area-level susceptibility to reinfection covariate must be greater than zero.")
   NTotalpost=nrow(data)
   NTotalGrid=length(unique(data$Label_NC_shape))
   NAllPostPerGrid <- table(data$Label_NC_shape)
   MaxTimePand=max(ceiling(data[,8]))+15
   Lat=data[,1]
   Long=data[,2]
-  ################### Adjacency matrix #######################
-  I=diag(NTotalGrid)
-  A1=adjacency_matrix
-  A2=colSums(A1)
-  D=-A1
-  diag(D)=A2
-  ##################### Region labels ########################
-NLableGrid=as.numeric(as.vector(data[,9]))
+  D=-1*(adjacency_matrix)
+  diag(D)=colSums(adjacency_matrix)
+  NLableGrid=as.numeric(as.vector(data[,9]))
   NewLabelGrid=matrix(0,NTotalpost,NTotalGrid)
   for(RHAD in 1:NTotalGrid){
     for(i in 1:NTotalpost){
@@ -80,7 +75,6 @@ NLableGrid=as.numeric(as.vector(data[,9]))
       }
     }
   }
-  #################### Distance matrix #######################
   Dist=matrix(0,NTotalpost,NTotalpost)
   for(i in 1:NTotalpost){
     for(j in 1:NTotalpost){
@@ -88,198 +82,139 @@ NLableGrid=as.numeric(as.vector(data[,9]))
     }
   }
   Dist=Dist*50
-  ################## Population size #########################
-  ################### Infected size ##########################
   Pop=data[,3]
   NInf=data[,4]
   NReInf=data[data$status==1,4]
-  ################### Spatial rendom effects #################
-  mu=rep(0,NTotalGrid)
-  Sigma0=solve(tau0^2*(lambda0*D+(1-lambda0)*I))
-  phi=mvrnorm(1, mu, Sigma0, tol = 1e-6)
-  ######################### Covaraites #######################
+  Sigma0=solve(tau0^2*(lambda0*D+(1-lambda0)*diag(NTotalGrid)))
+  rnd=mvrnorm(1, rep(0,NTotalGrid), Sigma0, tol = 1e-6)
   CovInf=as.matrix(data[,c(6,7)])
   dimnames(   CovInf) <- NULL
   CovSus=as.matrix(data[, c(10, 11)])
   dimnames( CovSus) <- NULL
   CovSusReInf=as.matrix(data[, c(10, 11)])
   dimnames(CovSusReInf) <- NULL
-
   BetaCovInf0=rep(1,DimCovInf)
   BetaCovSus0=rep(1,DimCovSus)
   BetaCovSusReInf0=rep(1,DimCovSusReInf)
-
-  InfPeriod=rep(InfPrd,NTotalpost) ############# ifected period ###############
-  IncPeriod=rep(IncPrd,NTotalpost)    ############ Incubation  period ############
+  InfPeriod=rep(InfPrd,NTotalpost)
+  IncPeriod=rep(IncPrd,NTotalpost)
   ExpoTime=ceiling(data[,8])
   ExpoTimeReInf=ceiling(data[data$status==1,8])
   InfTime=ExpoTime+IncPeriod[1]
   ReInfTime= ExpoTimeReInf+IncPeriod[1]
-
-########################################################################
-  SumH=function(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT){
-    SumH1=rep(0,NTotalpost)
-    for(j in 1:NTotalpost){
-      if (NewLabelGrid[j,GridIndic]!=0){
-        if(InfTime[j]<=t & (InfTime[j]+InfPeriod[j])>=t & InfTime[j]!=0){
-          SumH1[j]=NInf[j]*exp(alphaT+CovInf[j,]%*%BetaCovInf)*Dist[i,j]^(-delta)
-        }
+  is_exposed <- function(ExpoTime, IncPeriod, t, i) {
+    ExpoTime[i] <= t &
+      (ExpoTime[i] + IncPeriod[i]) > t &
+      ExpoTime[i] != 0
+  }
+  replace_nonfinite <- function(x, value = 0) {
+    x[!is.finite(x)] <- value
+    return(x)
+  }
+  FN1 <- function(NLableGrid, Dist, alphaS, delta, i, GridIndic, t,
+                   BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) {
+    FN11 <- rep(0, NTotalpost)
+    for (j in 1:NTotalpost) {
+      if (NewLabelGrid[j, GridIndic] != 0 && InfTime[j] <= t && (InfTime[j] + InfPeriod[j]) >= t && InfTime[j] != 0) {
+        FN11[j] <- NInf[j] * exp(alphaT + CovInf[j,] %*% BetaCovInf) * Dist[i, j]^(-delta)
       }
     }
-    SumH1=replace(SumH1,is.infinite(SumH1),0)
-    SumH2=sum(SumH1)
-    SumH3=exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+CovSusReInf[GridIndic,]%*%BetaCovSusReInf)*SumH2
-    return(SumH3)
+    FN11<- replace_nonfinite(FN11)
+    return(sum(FN11) * as.numeric(exp(alphaS + CovSus[GridIndic,] %*% BetaCovSus + CovSusReInf[GridIndic,] %*% BetaCovSusReInf)))
   }
-
-  ########################################################################
-
-  SumHReInf=function(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT){
-    SumH1ReInf=rep(0,NTotalpost)
+  FN2=function(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT){
+    FN22=rep(0,NTotalpost)
     for(j in 1:NTotalpost){
       if(data[j, 12] == 0){
         if (NewLabelGrid[j,GridIndic]!=0){
           if(ReInfTime[j]<=t & (ReInfTime[j]+InfPeriod[j])>=t & ReInfTime[j]!=0){
-            SumH1ReInf[j]=NReInf[j]*exp(alphaT+CovInf[j,]%*%BetaCovInf)*Dist[i,j]^(-delta)
+            FN22[j]=NReInf[j]*exp(alphaT+CovInf[j,]%*%BetaCovInf)*Dist[i,j]^(-delta)
           }
         }
       }
-      SumH1ReInf=replace(SumH1ReInf,is.infinite(SumH1ReInf),0)
-      SumH2ReInf=sum(SumH1ReInf)
-      SumH3ReInf=exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+CovSusReInf[GridIndic,]%*%BetaCovSusReInf)*SumH2ReInf
-      return(SumH3ReInf)
+      FN22=replace(FN22,is.infinite(FN22),0)
+      FN222=sum(FN22)
+      FN2222=exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+CovSusReInf[GridIndic,]%*%BetaCovSusReInf)*FN222
+      return(FN2222)
     }
   }
-
-  ########################################################################
-
-  SumW=function(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT){
-    SumW1=array(0,c(DimCovInf,1,NTotalpost))
-    for(j in 1:NTotalpost){
-      if (NewLabelGrid[j,GridIndic]!=0){
-        if(InfTime[j]<=t & (InfTime[j]+InfPeriod[j])>=t & InfTime[j]!=0){
-          SumW1[,,j]=NInf[j]*CovInf[j,]*as.numeric(exp(alphaT+CovInf[j,]%*%BetaCovInf))*Dist[i,j]^(-delta)
-        }
+  FN3 <- function(NLableGrid, Dist, alphaS, delta, i, GridIndic, t,
+                   BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) {
+    FN33 <- array(0, c(DimCovInf, 1, NTotalpost))
+    for (j in 1:NTotalpost) {
+      if (NewLabelGrid[j, GridIndic] != 0 && InfTime[j] <= t && (InfTime[j] + InfPeriod[j]) >= t && InfTime[j] != 0) {
+        FN33[,,j] <- NInf[j] * CovInf[j,] * as.numeric(exp(alphaT + CovInf[j,] %*% BetaCovInf)) * Dist[i, j]^(-delta)
       }
     }
-    SumW1[!is.finite(SumW1)]=NA
-    SumW2=apply(SumW1,c(1,2),sum,na.rm=T)
-    SumW3=SumW2*as.numeric(exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+CovSusReInf[GridIndic,]%*%BetaCovSusReInf))
-    return(SumW3)
+    FN33<- replace_nonfinite(FN33)
+    return(apply(FN33, c(1,2), sum, na.rm = TRUE) *
+             as.numeric(exp(alphaS + CovSus[GridIndic,] %*% BetaCovSus + CovSusReInf[GridIndic,] %*% BetaCovSusReInf)))
   }
-
-  ########################################################################
-
-  SumNewW1=function(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT){
-    SumW11=array(0,c(DimCovInf,DimCovInf,NTotalpost))
-    for(j in 1:NTotalpost){
-      if (NewLabelGrid[j,GridIndic]!=0){
-        if(InfTime[j]<=t & (InfTime[j]+InfPeriod[j])>=t & InfTime[j]!=0){
-          SumW11[,,j]=NInf[j]*CovInf[j,]%*%t(CovInf[j,])*as.numeric(exp(alphaT+CovInf[j,]%*%BetaCovInf))*Dist[i,j]^(-delta)
-        }
+  FN4 <- function(NLableGrid, Dist, alphaS, delta, i, GridIndic, t,
+                       BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) {
+    FN5 <- array(0, c(DimCovInf, DimCovInf, NTotalpost))
+    for (j in 1:NTotalpost) {
+      if (NewLabelGrid[j, GridIndic] != 0 && InfTime[j] <= t && (InfTime[j] + InfPeriod[j]) >= t && InfTime[j] != 0) {
+        FN5[,,j] <- NInf[j] * CovInf[j,] %*% t(CovInf[j,]) * as.numeric(exp(alphaT + CovInf[j,] %*% BetaCovInf)) * Dist[i, j]^(-delta)
       }
     }
-    SumW11[!is.finite(SumW11)]=NA
-    SumW21=apply(SumW11,c(1,2),sum,na.rm=T)
-    SumW31=SumW21*as.numeric(exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+CovSusReInf[GridIndic,]%*%BetaCovSusReInf))
-    return(SumW31)
+    FN5<- replace_nonfinite(FN5)
+    return(apply(FN5, c(1,2), sum, na.rm = TRUE) *
+             as.numeric(exp(alphaS + CovSus[GridIndic,] %*% BetaCovSus + CovSusReInf[GridIndic,] %*% BetaCovSusReInf)))
   }
-
-  ########################################################################
-
-  SumHnew1=function(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT){
-    SumH4=rep(0,NTotalpost)
-    for(j in 1:NTotalpost){
-      if (NewLabelGrid[j,GridIndic]!=0){
-        if(InfTime[j]<=t & (InfTime[j]+InfPeriod[j])>=t & InfTime[j]!=0){
-          SumH4[j]=NInf[j]*exp(alphaT+CovInf[j,]%*%BetaCovInf)*Dist[i,j]^(-delta)*(log(Dist[i,j]))
-        }
+  FN6 <- function(NLableGrid, Dist, alphaS, delta, i, GridIndic, t,
+                       BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) {
+    FN66 <- rep(0, NTotalpost)
+    for (j in 1:NTotalpost) {
+      if (NewLabelGrid[j, GridIndic] != 0 && InfTime[j] <= t && (InfTime[j] + InfPeriod[j]) >= t && InfTime[j] != 0) {
+        FN66[j] <- NInf[j] * exp(alphaT + CovInf[j,] %*% BetaCovInf) * Dist[i, j]^(-delta) * log(Dist[i, j])
       }
     }
-    SumH4=replace(SumH4,is.infinite(SumH4),0)
-    SumH5=sum(SumH4)
-  SumH6=exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+CovSusReInf[GridIndic,]%*%BetaCovSusReInf)*SumH5
-    return(SumH6)
+    FN66<- replace_nonfinite(FN66)
+    return(sum(FN66) * as.numeric(exp(alphaS + CovSus[GridIndic,] %*% BetaCovSus + CovSusReInf[GridIndic,] %*% BetaCovSusReInf)))
   }
 
-
-  ########################################################################
-
-  SumHnew2=function(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT){
-    SumH7=rep(0,NTotalpost)
-    for(j in 1:NTotalpost){
-      if (NewLabelGrid[j,GridIndic]!=0){
-        if(InfTime[j]<=t & (InfTime[j]+InfPeriod[j])>=t & InfTime[j]!=0){
-          SumH7[j]=NInf[j]*exp(alphaT+CovInf[j,]%*%BetaCovInf)*Dist[i,j]^(-delta)*(log(Dist[i,j]))^2
-        }
+  FN7 <- function(NLableGrid, Dist, alphaS, delta, i, GridIndic, t,
+                       BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) {
+    FN77 <- rep(0, NTotalpost)
+    for (j in 1:NTotalpost) {
+      if (NewLabelGrid[j, GridIndic] != 0 && InfTime[j] <= t && (InfTime[j] + InfPeriod[j]) >= t && InfTime[j] != 0) {
+        FN77[j] <- NInf[j] * exp(alphaT + CovInf[j,] %*% BetaCovInf) * Dist[i, j]^(-delta) * (log(Dist[i, j]))^2
       }
     }
-    SumH7=replace(SumH7,is.infinite(SumH7),0)
-    SumH8=sum(SumH7)
-    SumH9=exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+CovSusReInf[GridIndic,]%*%BetaCovSusReInf)*SumH8
-    return(SumH9)
+    FN77<- replace_nonfinite(FN77)
+    return(sum(FN77) * as.numeric(exp(alphaS + CovSus[GridIndic,] %*% BetaCovSus + CovSusReInf[GridIndic,] %*% BetaCovSusReInf)))
   }
-
-
-
-
-  ################################ Expectations ##########################
-
-  Fy1=function(phi,alphaS,delta,lambda1,tau1,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT){
-  fy1=array(0,c(NTotalpost,MaxTimePand,NTotalGrid))
-    for(i in 1:NTotalpost){
-      for(t in 1:MaxTimePand){
-        for(GridIndic in 1:NTotalGrid){
-          if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]>t|ExpoTime[i]==0){
-              dx1=rep(0,NTotalpost)
-              for(j in 1:NTotalpost){
-                if (NewLabelGrid[j,GridIndic]!=0){
-                  if(InfTime[j]<=t & (InfTime[j]+InfPeriod[j])>=t & InfTime[j]!=0){
-                    dx1[j]=NInf[j]*exp(alphaT+CovInf[j,]%*%BetaCovInf)*Dist[i,j]^(-delta)
-                  }
-                }
-              }
-              dx1=replace(dx1,is.infinite(dx1),0)
-              dx=sum(dx1)
-            prob1=1-exp(-Pop[i]*exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+phi[GridIndic]+CovSusReInf[GridIndic,]%*%BetaCovSusReInf)*dx)
-              fy1[i,t,GridIndic]=(1-prob1)
+  FN8 <- function(rnd, alphaS, delta, lambda1, tau1, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) {
+    FN9 <- array(0, c(NTotalpost, MaxTimePand, NTotalGrid))
+    for (i in 1:NTotalpost) {
+      for (t in 1:MaxTimePand) {
+        for (GridIndic in 1:NTotalGrid) {
+          if (NLableGrid[i] == GridIndic) {
+            dx_fun <- function() {
+              dx <- rep(0, NTotalpost)
+              idx <- which(NewLabelGrid[, GridIndic] != 0 & InfTime <= t & (InfTime + InfPeriod) >= t & InfTime != 0)
+              dx[idx] <- NInf[idx] * exp(alphaT + CovInf[idx, ] %*% BetaCovInf) * Dist[i, idx]^(-delta)
+              sum(dx[is.finite(dx)])
             }
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-            dx4=rep(0,NTotalpost)
-              for(j in 1:NTotalpost){
-                if (NewLabelGrid[j,GridIndic]!=0){
-                  if(InfTime[j]<=t & (InfTime[j]+InfPeriod[j])>=t & InfTime[j]!=0){
-                    dx4[j]=NInf[j]*exp(alphaT+CovInf[j,]%*%BetaCovInf)*Dist[i,j]^(-delta)
-                  }
-                }
-              }
-              dx4=replace(dx4,is.infinite(dx4),0)
-              dx5=sum(dx4)
-              prob2=1-exp(-Pop[i]*exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+phi[GridIndic]+CovSusReInf[GridIndic,]%*%BetaCovSusReInf)*dx5)
-              fy1[i,t,GridIndic]=(prob2)
+            if (ExpoTime[i] > t | ExpoTime[i] == 0) {
+              dx <- dx_fun()
+              FN9[i, t, GridIndic] <- 1 - (1 - exp(-Pop[i] * exp(alphaS + CovSus[GridIndic, ] %*% BetaCovSus + rnd[GridIndic] + CovSusReInf[GridIndic, ] %*% BetaCovSusReInf) * dx))
+            }
+            if (ExpoTime[i] <= t & (ExpoTime[i] + IncPeriod[i]) > t & ExpoTime[i] != 0) {
+              dx <- dx_fun()
+              FN9[i, t, GridIndic] <- 1 - exp(-Pop[i] * exp(alphaS + CovSus[GridIndic, ] %*% BetaCovSus + rnd[GridIndic] + CovSusReInf[GridIndic, ] %*% BetaCovSusReInf) * dx)
             }
           }
         }
       }
     }
-
-    PP=c()
-    H=list()
-    fy2=c()
-    for(GridIndic in 1:NTotalGrid){
-      for(i in 1:NTotalpost){
-        PP[i]=round(prod(fy1[i,,GridIndic][fy1[i,,GridIndic]>0]),10)
-      }
-      H[[GridIndic]]=which(PP!=1)
-      fy2[GridIndic]=prod(PP[H[[GridIndic]]][PP[H[[GridIndic]]]>0])
-    }
-    return(fy2)
+    FN10 <- sapply(1:NTotalGrid, function(GridIndic) {
+      FN11 <-
+        prod(sapply(1:NTotalpost, function(i) round(prod(FN9[i, , GridIndic][FN9[i, , GridIndic] > 0]), 10))[which(sapply(1:NTotalpost, function(i) round(prod(FN9[i, , GridIndic][FN9[i, , GridIndic] > 0]), 10)) != 1)][sapply(1:NTotalpost, function(i) round(prod(FN9[i, , GridIndic][FN9[i, , GridIndic] > 0]), 10))[which(sapply(1:NTotalpost, function(i) round(prod(FN9[i, , GridIndic][FN9[i, , GridIndic] > 0]), 10)) != 1)] > 0])
+    })
+    return(FN10)
   }
-
-  ########################################################################
-  ########################################################################
-  ########################################################################
   alphaS=alphaS0
   delta=delta0
   tau1=tau0
@@ -288,831 +223,556 @@ NLableGrid=as.numeric(as.vector(data[,9]))
   BetaCovSus=BetaCovSus0
   BetaCovSusReInf=BetaCovSusReInf0
   alphaT=alphaT0
-
-  ########################################################################
-  ########################################################################
-  ########################################################################
+  rndmef <- matrix(0, NIterMC + 1, NTotalGrid)
+  Sigma1 <- solve(tau1^2 * (lambda1 * D + (1 - lambda1) * diag(NTotalGrid)))
+  rndmef[1, ] <- mvrnorm(1, rep(0,NTotalGrid), Sigma1, tol = 1e-6)
   estfun=function(NLableGrid,Dist,alphaS,delta,lambda1,tau1,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT){
-    Pos=matrix(0,NIterMC+1,NTotalGrid)
-    mu=rep(0,NTotalGrid)
-    Sigma1=solve(tau1^2*(lambda1*D+(1-lambda1)*I))
-    phi0=mvrnorm(1, mu, Sigma1, tol = 1e-6)
-
-    Pos[1,]=phi0
-    Uni=c()
-    MPHphi=c()
-    for(L in 2:NIterMC){
-     phi=mvrnorm(1, mu, Sigma1, tol = 1e-6)
-      UEST1=Fy1(phi,alphaS,delta,lambda1,tau1,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT)
-      UEST2=Fy1(Pos[L-1,],alphaS,delta,lambda1,tau1,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT)
-      Uni[L]=runif(1,0,1)
-
-      MPHphi[L]=min(1,prod(UEST1/UEST2))
-      if(Uni[L]<MPHphi[L]){
-        Pos[L,]=phi
-      }
-
-      if(Uni[L]>=MPHphi[L]){
-        Pos[L,]=Pos[L-1,]
-      }
+    for (L in 2:NIterMC) {
+      rnd <- mvrnorm(1, rep(0,NTotalGrid), Sigma1, tol = 1e-6)
+      FN20 <- min(1, prod(FN8(rnd, alphaS, delta, lambda1, tau1, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) /
+                              FN8(rndmef[L - 1, ], alphaS, delta, lambda1, tau1, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)))
+      rndmef[L, ] <- if (runif(1) < FN20) rnd else rndmef[L - 1, ]
     }
-
-    mean1=function(Pos,GridIndic){
-      d1=c()
-      for(L in 1:NIterMC){
-        d1[L]=exp(Pos[L,GridIndic])
-      }
-      SMean1=mean(d1)
-      return(SMean1)
+    AV1 <- function(rndmef, GridIndic) mean(exp(rndmef[1:NIterMC, GridIndic]))
+    calc_prob <- function(L, i, GridIndic, rndmef, alphaS, delta, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) {
+      idx <- which(NewLabelGrid[, GridIndic] != 0 & InfTime <= t & (InfTime + InfPeriod) >= t & InfTime != 0)
+      dx <- sum(NInf[idx] * exp(alphaT + CovInf[idx, ] %*% BetaCovInf) * Dist[i, idx]^(-delta), na.rm = TRUE)
+      PRB1 <- 1 - exp(-Pop[i] * exp(alphaS + CovSus[GridIndic, ] %*% BetaCovSus +
+                                      CovSusReInf[GridIndic, ] %*% BetaCovSusReInf + rndmef[L, GridIndic]) * dx)
+      return(PRB1)
     }
-
-
-    mean2=function(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L){
-      dx1=rep(0,NTotalpost)
-      for(j in 1:NTotalpost){
-        if (NewLabelGrid[j,GridIndic]!=0){
-          if(InfTime[j]<=t & (InfTime[j]+InfPeriod[j])>=t & InfTime[j]!=0){
-            dx1[j]=NInf[j]*exp(alphaT+CovInf[j,]%*%BetaCovInf)*Dist[i,j]^(-delta)
-          }
-        }
-      }
-      dx1=replace(dx1,is.infinite(dx1),0)
-      dx=sum(dx1)
-
-      prob1=1-exp(-Pop[i]*exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+CovSusReInf[GridIndic,]%*%BetaCovSusReInf+Pos[L,GridIndic])*dx)
-      if(prob1==0){SMean2=0}
-      if(prob1!=0){
-        SMean2=(1-prob1)/prob1*exp(Pos[L,GridIndic])
-      }
-      return(SMean2)
+    AV2 <- function(NLableGrid, rndmef, Dist, alphaS, delta, lambda1, i, GridIndic, t, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT, L) {
+      PROB <- calc_prob(L, i, GridIndic, rndmef, alphaS, delta, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)
+      if (PROB == 0) return(0)
+      (1 - PROB) / PROB * exp(rndmef[L, GridIndic])
     }
-
-    mean3=function(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L){
-   dx1=rep(0,NTotalpost)
-      for(j in 1:NTotalpost){
-        if (NewLabelGrid[j,GridIndic]!=0){
-          if(InfTime[j]<=t & (InfTime[j]+InfPeriod[j])>=t & InfTime[j]!=0){
-            dx1[j]=NInf[j]*exp(alphaT+CovInf[j,]%*%BetaCovInf)*Dist[i,j]^(-delta)
-          }
-        }
-      }
-      dx1=replace(dx1,is.infinite(dx1),0)
-      dx=sum(dx1)
-      prob1=1-exp(-Pop[i]*exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+CovSusReInf[GridIndic,]%*%BetaCovSusReInf+Pos[L,GridIndic])*dx)
-      if(prob1==0){SMean3=0}
-      if(prob1!=0){
-        SMean3=(1-prob1)/prob1^2*exp(2*Pos[L,GridIndic])
-      }
-    return(SMean3)
+    AV3 <- function(NLableGrid, rndmef, Dist, alphaS, delta, lambda1, i, GridIndic, t, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT, L) {
+      PROB <- calc_prob(L, i, GridIndic, rndmef, alphaS, delta, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)
+      if (PROB == 0) return(0)
+      (1 - PROB) / PROB^2 * exp(2 * rndmef[L, GridIndic])
     }
-
-    ######################################## alpha #######################################
-
-    A1=rep(0,MaxTimePand)
+    FQ1 <- sum(sapply(1:MaxTimePand, function(t) {
+      sum(sapply(1:NTotalpost, function(i) {
+        GridIndic <- NLableGrid[i]
+        if (ExpoTime[i] > t | ExpoTime[i] == 0) {
+          -Pop[i] * as.numeric(FN1(NLableGrid, Dist, alphaS, delta, i, GridIndic, t,
+                                    BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) *
+                                 AV1(rndmef, GridIndic))
+        } else 0
+      }), na.rm = TRUE)
+    }), na.rm = TRUE)
+    FQ2=rep(0,MaxTimePand)
     for(t in 1:MaxTimePand){
-      A2=rep(0,NTotalpost)
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]>t|ExpoTime[i]==0){
-              A2[i]=-Pop[i]*as.numeric(SumH(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT)*mean1(Pos,GridIndic))
-            }
-          }
-        }
-      }
-      A1[t]=sum(A2)
-    }
-    SusA1=sum(A1)
-
-    ########################################################################
-
-    A3=rep(0,MaxTimePand)
-    for(t in 1:MaxTimePand){
-      A4=rep(0,NTotalpost)
+      FQ3=rep(0,NTotalpost)
       for(i in 1:NTotalpost){
         for(GridIndic in 1:NTotalGrid){
           if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              SA4=c()
+            if(is_exposed(ExpoTime, IncPeriod, t, i)){
+              FQ4=c()
               for(L in 1:NIterMC){
-                SA4[L]=mean2(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
+                FQ4[L]=AV2(NLableGrid,rndmef,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
               }
-             A4[i]=Pop[i]*as.numeric(SumH(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT)*mean(SA4))
+              FQ3[i]=Pop[i]*as.numeric(FN1(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT)*mean(FQ4))
             }
           }
         }
       }
-      A3[t]=sum(A4)
+      FQ2[t]=sum(FQ3)
     }
-    InfA3=sum(A3,na.rm=T)
-    EndA3=SusA1+InfA3
-    ######################### Second Der...########################
-
-    A5=rep(0,MaxTimePand)
+    FQ5=sum(FQ2,na.rm=T)
+    FQ6=FQ1+FQ5
+    FQ7=rep(0,MaxTimePand)
     for(t in 1:MaxTimePand){
-      A6=rep(0,NTotalpost)
+      FQ8=rep(0,NTotalpost)
       for(i in 1:NTotalpost){
         for(GridIndic in 1:NTotalGrid){
           if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-            SA6=c()
+            if(is_exposed(ExpoTime, IncPeriod, t, i)){
+              FQ9=c()
               for(L in 1:NIterMC){
-                SA6[L]=mean3(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
+                FQ9[L]=AV3(NLableGrid,rndmef,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
               }
-              A6[i]=-Pop[i]^2*as.numeric((SumH(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT))^2*mean(SA6))
+              FQ8[i]=-Pop[i]^2*as.numeric((FN1(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT))^2*mean(FQ9))
             }
           }
         }
       }
-      A5[t]=sum(A6)
+      FQ7[t]=sum(FQ8)
     }
-    InfA5=sum(A5,na.rm=T)
-    EndA5=EndA3+InfA5
-    EstAlphaS=alphaS-EndA3/EndA5
-
-
-    #################################BetaCovSus##################################
-
-    Y1=array(0,c(DimCovSus,1,MaxTimePand))
+    FQ10=sum(FQ7,na.rm=T)
+    FQ11=FQ6+FQ10
+    EstAlphaS=alphaS-FQ6/FQ11
+    FQ12 <- array(0, c(DimCovSus, 1, MaxTimePand))
     for(t in 1:MaxTimePand){
-      Y2=array(0,c(DimCovSus,1,NTotalpost))
       for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]>t|ExpoTime[i]==0){
-              Y2[,,i]=-Pop[i]*CovSus[GridIndic,]*as.numeric(SumH(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT)*mean1(Pos,GridIndic))
-            }
-          }
+        GridIndic <- NLableGrid[i]
+        if(ExpoTime[i] > t | ExpoTime[i] == 0){
+          FQ12[,,t] <- FQ12[,,t] - Pop[i] * CovSus[GridIndic, , drop = FALSE] *
+            as.numeric(FN1(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+                            BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) *
+                         AV1(rndmef, GridIndic))
         }
       }
-      Y1[,,t]=apply(Y2,c(1,2),sum)
     }
-    SusY1=apply(Y1,c(1,2),sum)
-
-    ########################################################################
-
-    Y3=array(0,c(DimCovSus,1,MaxTimePand))
+    FQ13 <- apply(FQ12, c(1,2), sum)
+    FQ14 <- array(0, c(DimCovSus, 1, MaxTimePand))
     for(t in 1:MaxTimePand){
-      Y4=array(0,c(DimCovSus,1,NTotalpost))
       for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              YA4=c()
-              for(L in 1:NIterMC){
-                YA4[L]=mean2(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-              Y4[,,i]=Pop[i]*CovSus[GridIndic,]*as.numeric(SumH(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT)*mean(YA4))
-            }
-          }
+        GridIndic <- NLableGrid[i]
+        if(ExpoTime[i] <= t & (ExpoTime[i] + IncPeriod[i]) > t & ExpoTime[i] != 0){
+          FQ15 <- sapply(1:NIterMC, function(L)
+            AV2(NLableGrid, rndmef, Dist, alphaS, delta, lambda1,
+                  i, GridIndic, t, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT, L))
+          FQ14[,,t] <- FQ14[,,t] + Pop[i] * CovSus[GridIndic, , drop = FALSE] *
+            as.numeric(FN1(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+                            BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) *
+                         mean(FQ15))
         }
       }
-      Y3[,,t]=apply(Y4,c(1,2),sum,na.rm=T)
     }
-    InfY3=apply(Y3,c(1,2),sum)
-    EndY3=SusY1+InfY3
-    ######################### Second Der...########################
+    FQ16 <- apply(FQ14, c(1,2), sum, na.rm = TRUE)
+    FQ17 <- FQ13 + FQ16
+    FQ18 <- array(0, c(DimCovSus, DimCovSus, MaxTimePand))
+    FQ19 <- array(0, c(DimCovSus, DimCovSus, MaxTimePand))
+    FQ20  <- array(0, c(DimCovSus, DimCovSus, MaxTimePand))
+    CovMatrices <- lapply(1:NTotalGrid, function(g) {
+      cov_vec <- matrix(CovSus[g, ], ncol = 1)
+      cov_vec %*% t(cov_vec)
+    })
 
-    YY1=array(0,c(DimCovSus,DimCovSus,MaxTimePand))
-    for(t in 1:MaxTimePand){
-      YY2=array(0,c(DimCovSus,DimCovSus,NTotalpost))
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]>t|ExpoTime[i]==0){
-              YY2[,,i]=-Pop[i]*CovSus[GridIndic,]%*%t(CovSus[GridIndic,])*as.numeric(SumH(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT)*mean1(Pos,GridIndic))
-            }
-          }
+    for (t in 1:MaxTimePand) {
+      for (i in 1:NTotalpost) {
+        GridIndic <- NLableGrid[i]
+        if (ExpoTime[i] > t | ExpoTime[i] == 0) {
+          contrib <- -Pop[i] * as.numeric(
+            FN1(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+                 BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) *
+              AV1(rndmef, GridIndic)
+          )
+          FQ18[,,t] <- FQ18[,,t] + CovMatrices[[GridIndic]] * contrib
         }
       }
-      YY1[,,t]=apply(YY2,c(1,2),sum)
-    }
-    SusYY1=apply(YY1,c(1,2),sum)
-
-    ########################################################################
-
-    YY3=array(0,c(DimCovSus,DimCovSus,MaxTimePand))
-    for(t in 1:MaxTimePand){
-    YY4=array(0,c(DimCovSus,DimCovSus,NTotalpost))
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              YA45=c()
-              for(L in 1:NIterMC){
-                YA45[L]=mean2(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-              YY4[,,i]=Pop[i]*CovSus[GridIndic,]%*%t(CovSus[GridIndic,])*as.numeric(SumH(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT)*mean(YA45))
-            }
+      for (i in 1:NTotalpost) {
+        GridIndic <- NLableGrid[i]
+        if (ExpoTime[i] <= t & (ExpoTime[i] + IncPeriod[i]) > t & ExpoTime[i] != 0) {
+          FQ21 <- numeric(NIterMC)
+          for (L in 1:NIterMC) {
+            FQ21[L] <- AV2(NLableGrid, rndmef, Dist, alphaS, delta, lambda1,
+                             i, GridIndic, t, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT, L)
           }
+          contrib <- Pop[i] * as.numeric(
+            FN1(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+                 BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) *
+              mean(FQ21)
+          )
+          FQ19[,,t] <- FQ19[,,t] + CovMatrices[[GridIndic]] * contrib
         }
       }
-      YY3[,,t]=apply(YY4,c(1,2),sum)
-    }
-    InfYY3=apply(YY3,c(1,2),sum,na.rm=T)
 
-
-    Y5=array(0,c(DimCovSus,DimCovSus,MaxTimePand))
-    for(t in 1:MaxTimePand){
-      Y6=array(0,c(DimCovSus,DimCovSus,NTotalpost))
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              YA65=c()
-              for(L in 1:NIterMC){
-                YA65[L]=mean3(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-
-              Y6[,,i]=-Pop[i]^2*CovSus[GridIndic,]%*%t(CovSus[GridIndic,])*as.numeric((SumH(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT))^2*mean(YA65))
-            }
+      for (i in 1:NTotalpost) {
+        GridIndic <- NLableGrid[i]
+        if (ExpoTime[i] <= t & (ExpoTime[i] + IncPeriod[i]) > t & ExpoTime[i] != 0) {
+          FQ22 <- numeric(NIterMC)
+          for (L in 1:NIterMC) {
+            FQ22[L] <- AV3(NLableGrid, rndmef, Dist, alphaS, delta, lambda1,
+                             i, GridIndic, t, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT, L)
           }
+          contrib <- -Pop[i]^2 * as.numeric(
+            (FN1(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+                  BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)^2) * mean(FQ22)
+          )
+          FQ20[,,t] <- FQ20[,,t] + CovMatrices[[GridIndic]] * contrib
         }
       }
-      Y5[,,t]=apply(Y6,c(1,2),sum,na.rm=T)
     }
-    InfY5=apply(Y5,c(1,2),sum)
-    EndY5=SusYY1+InfYY3+InfY5
-
+    FQ23 <- apply(FQ18, c(1,2), sum)
+    FQ24 <- apply(FQ19, c(1,2), sum, na.rm = TRUE)
+    FQ25  <- apply(FQ20, c(1,2), sum, na.rm = TRUE)
+    FQ26  <- FQ23 + FQ24 + FQ25 + 0.01
     epsilon <- 1e-3
-    if (det(EndY5) < epsilon) {
-      EndY5 <- EndY5 + diag(epsilon, nrow(EndY5))
+    if (det(FQ26) < epsilon) {
+      FQ26 <- FQ26 + diag(epsilon, nrow(FQ26))
     }
-
-    EstBetaCovSus=BetaCovSus-solve(EndY5)%*%EndY3
-
-
-    #################################BetaCovSusReInf##################################
-
-
-    Y1r=array(0,c(DimCovSusReInf,1,MaxTimePand))
+    EstBetaCovSus <- BetaCovSus - solve(FQ26) %*% FQ17
+    J1=array(0,c(DimCovSusReInf,1,MaxTimePand))
     for(t in 1:MaxTimePand){
-      Y2r=array(0,c(DimCovSusReInf,1,NTotalpost))
+      J2=array(0,c(DimCovSusReInf,1,NTotalpost))
       for(i in 1:NTotalpost){
         for(GridIndic in 1:NTotalGrid){
           if (NLableGrid[i]==GridIndic){
             if(ExpoTime[i]>t|ExpoTime[i]==0){
-              Y2r[,,i]=-Pop[i]*CovSusReInf[GridIndic,]*as.numeric(SumHReInf(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,BetaCovSusReInf,alphaT)*mean1(Pos,GridIndic))
+              J2[,,i]=-Pop[i]*CovSusReInf[GridIndic,]*as.numeric(FN2(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,BetaCovSusReInf,alphaT)*AV1(rndmef,GridIndic))
             }
           }
         }
       }
-      Y1r[,,t]=apply(Y2r,c(1,2),sum)
+      J1[,,t]=apply(J2,c(1,2),sum)
     }
-    SusY1r=apply(Y1r,c(1,2),sum)
-
-    ########################################################################
-
-    Y3r=array(0,c(DimCovSusReInf,1,MaxTimePand))
+    J3=apply(J1,c(1,2),sum)
+    J4=array(0,c(DimCovSusReInf,1,MaxTimePand))
     for(t in 1:MaxTimePand){
-      Y4r=array(0,c(DimCovSusReInf,1,NTotalpost))
-     for(i in 1:NTotalpost){
+      J5=array(0,c(DimCovSusReInf,1,NTotalpost))
+      for(i in 1:NTotalpost){
         for(GridIndic in 1:NTotalGrid){
           if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
+            if(is_exposed(ExpoTime, IncPeriod, t, i)){
               YA4r=c()
               for(L in 1:NIterMC){
-                YA4r[L]=mean2(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
+                YA4r[L]=AV2(NLableGrid,rndmef,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
               }
-              Y4r[,,i]=Pop[i]*CovSusReInf[GridIndic,]*as.numeric(SumHReInf(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,BetaCovSusReInf,alphaT)*mean(YA4r))
+              J5[,,i]=Pop[i]*CovSusReInf[GridIndic,]*as.numeric(FN2(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,BetaCovSusReInf,alphaT)*mean(YA4r))
             }
           }
         }
       }
-      Y3r[,,t]=apply(Y4r,c(1,2),sum,na.rm=T)
+      J4[,,t]=apply(J5,c(1,2),sum,na.rm=T)
     }
-    InfY3r=apply(Y3r,c(1,2),sum)
-
-    EndY3r=SusY1r+InfY3r
-    ######################### Second Der...########################
-
-    YY1r=array(0,c(DimCovSusReInf,DimCovSusReInf,MaxTimePand))
+    J6=apply(J4,c(1,2),sum)
+    J7=J3+J6
+    J8=array(0,c(DimCovSusReInf,DimCovSusReInf,MaxTimePand))
     for(t in 1:MaxTimePand){
-      YY2r=array(0,c(DimCovSusReInf,DimCovSusReInf,NTotalpost))
+      J9=array(0,c(DimCovSusReInf,DimCovSusReInf,NTotalpost))
       for(i in 1:NTotalpost){
         for(GridIndic in 1:NTotalGrid){
           if (NLableGrid[i]==GridIndic){
             if(ExpoTime[i]>t|ExpoTime[i]==0){
-              YY2r[,,i]=-Pop[i]*CovSusReInf[GridIndic,]%*%t(CovSusReInf[GridIndic,])*as.numeric(SumHReInf(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,BetaCovSusReInf,alphaT)*mean1(Pos,GridIndic))
+              J9[,,i]=-Pop[i]*CovSusReInf[GridIndic,]%*%t(CovSusReInf[GridIndic,])*as.numeric(FN2(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,BetaCovSusReInf,alphaT)*AV1(rndmef,GridIndic))
             }
           }
         }
       }
-      YY1r[,,t]=apply(YY2r,c(1,2),sum)
+      J8[,,t]=apply(J9,c(1,2),sum)
     }
-    SusYY1r=apply(YY1r,c(1,2),sum)
-
-    ########################################################################
-
-    YY3r=array(0,c(DimCovSusReInf,DimCovSusReInf,MaxTimePand))
+    J10=apply(J8,c(1,2),sum)
+    J11=array(0,c(DimCovSusReInf,DimCovSusReInf,MaxTimePand))
     for(t in 1:MaxTimePand){
-      YY4r=array(0,c(DimCovSusReInf,DimCovSusReInf,NTotalpost))
+      J12=array(0,c(DimCovSusReInf,DimCovSusReInf,NTotalpost))
       for(i in 1:NTotalpost){
         for(GridIndic in 1:NTotalGrid){
           if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-
-              YA45r=c()
+            if(is_exposed(ExpoTime, IncPeriod, t, i)){
+              J13=c()
               for(L in 1:NIterMC){
-                YA45r[L]=mean2(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
+                J13[L]=AV2(NLableGrid,rndmef,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
               }
-              YY4r[,,i]=Pop[i]*CovSusReInf[GridIndic,]%*%t(CovSusReInf[GridIndic,])*as.numeric(SumHReInf(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,BetaCovSusReInf,alphaT)*mean(YA45r))
+              J12[,,i]=Pop[i]*CovSusReInf[GridIndic,]%*%t(CovSusReInf[GridIndic,])*as.numeric(FN2(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,BetaCovSusReInf,alphaT)*mean(J13))
             }
           }
         }
       }
-      YY3r[,,t]=apply(YY4r,c(1,2),sum)
+      J11[,,t]=apply(J12,c(1,2),sum)
     }
-    InfYY3r=apply(YY3r,c(1,2),sum,na.rm=T)
-
-    Y5r=array(0,c(DimCovSusReInf,DimCovSusReInf,MaxTimePand))
+    J14=apply(J11,c(1,2),sum,na.rm=T)
+    J15=array(0,c(DimCovSusReInf,DimCovSusReInf,MaxTimePand))
     for(t in 1:MaxTimePand){
-      Y6r=array(0,c(DimCovSusReInf,DimCovSusReInf,NTotalpost))
+      J16=array(0,c(DimCovSusReInf,DimCovSusReInf,NTotalpost))
       for(i in 1:NTotalpost){
         for(GridIndic in 1:NTotalGrid){
           if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              YA65r=c()
+            if(is_exposed(ExpoTime, IncPeriod, t, i)){
+              J17=c()
               for(L in 1:NIterMC){
-                YA65r[L]=mean3(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
+                J17[L]=AV3(NLableGrid,rndmef,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
               }
-              Y6r[,,i]=-Pop[i]^2*CovSusReInf[GridIndic,]%*%t(CovSusReInf[GridIndic,])*as.numeric((SumHReInf(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,BetaCovSusReInf,alphaT))^2*mean(YA65r))
+              J16[,,i]=-Pop[i]^2*CovSusReInf[GridIndic,]%*%t(CovSusReInf[GridIndic,])*as.numeric((FN2(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,BetaCovSusReInf,alphaT))^2*mean(J17))
             }
           }
         }
       }
-      Y5r[,,t]=apply(Y6r,c(1,2),sum,na.rm=T)
+      J15[,,t]=apply(J16,c(1,2),sum,na.rm=T)
     }
-    InfY5r=apply(Y5r,c(1,2),sum)
-    EndY5r=SusYY1r+InfYY3r+InfY5r
-
+    J18=apply(J15,c(1,2),sum)
+    J19=J10+J14+J18
     epsilon <- 1e-3
-    if (det(EndY5r) < epsilon) {
-      EndY5r <- EndY5r + diag(epsilon, nrow(EndY5r))
+    if (det(J19) < epsilon) {
+      J19 <- J19 + diag(epsilon, nrow(J19))
     }
-
-    EstBetaCovSusReInf=BetaCovSusReInf-solve(EndY5r)%*%EndY3r
-
-    ######################################## alphaT #######################################
-
-    TA1=rep(0,MaxTimePand)
+    EstBetaCovSusReInf=BetaCovSusReInf-solve(J19)%*%J7
+    contrib_time <- function(i, t) {
+      GridIndic <- NLableGrid[i]
+      if (ExpoTime[i] > t | ExpoTime[i] == 0) {
+        return(-Pop[i] * as.numeric(
+          FN1(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+               BetaCovInf, EstBetaCovSus, EstBetaCovSusReInf, alphaT) *
+            AV1(rndmef, GridIndic)
+        ))
+      } else if (is_exposed(ExpoTime, IncPeriod, t, i)) {
+        IA <- sapply(1:NIterMC, function(L)
+          AV2(NLableGrid, rndmef, Dist, alphaS, delta, lambda1, i, GridIndic, t,
+                BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT, L)
+        )
+        return(Pop[i] * as.numeric(
+          FN1(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+               BetaCovInf, EstBetaCovSus, EstBetaCovSusReInf, alphaT) * mean(IA)
+        ))
+      } else return(0)
+    }
+    J20 <- sapply(1:MaxTimePand, function(t)
+      sum(sapply(1:NTotalpost, contrib_time, t = t), na.rm = TRUE)
+    )
+    J21 <- sum(J20, na.rm = TRUE)
+    J22 <- J21 + sum(J20, na.rm = TRUE)  # Actually same as J21 + TInfA3
+    J23 <- rep(0, MaxTimePand)
     for(t in 1:MaxTimePand){
-      TA2=rep(0,NTotalpost)
       for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]>t|ExpoTime[i]==0){
-              TA2[i]=-Pop[i]*as.numeric(SumH(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,alphaT)*mean1(Pos,GridIndic))
-            }
-          }
+        GridIndic <- NLableGrid[i]
+        if(is_exposed(ExpoTime, IncPeriod, t, i)){
+          J23[t] <- J23[t] - Pop[i]^2 * as.numeric(
+            (FN1(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+                  BetaCovInf, EstBetaCovSus, EstBetaCovSusReInf, alphaT))^2 *
+              mean(sapply(1:NIterMC, function(L) AV3(NLableGrid, rndmef, Dist, alphaS, delta,
+                                                       lambda1, i, GridIndic, t,
+                                                       BetaCovInf, BetaCovSus, BetaCovSusReInf,
+                                                       alphaT, L)))
+          )
         }
       }
-      TA1[t]=sum(TA2)
     }
-    TSusA1=sum(TA1)
-
-
-    ########################################################################
-
-    TA3=rep(0,MaxTimePand)
+    J24 <- sum(J23, na.rm = TRUE)
+    J25 <- J22 + J24
+    EstAlphaT <- alphaT - J22 / J25
+    KL1 <- array(0, c(DimCovInf, 1, MaxTimePand))
     for(t in 1:MaxTimePand){
-      TA4=rep(0,NTotalpost)
       for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              IA4=c()
-              for(L in 1:NIterMC){
-                IA4[L]=mean2(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-          TA4[i]=Pop[i]*as.numeric(SumH(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,alphaT)*mean(IA4))
-            }
-          }
+        GridIndic <- NLableGrid[i]
+        if(ExpoTime[i] > t | ExpoTime[i] == 0){
+          KL1[,,t] <- KL1[,,t] - Pop[i] * FN3(NLableGrid, Dist, EstAlphaS, delta,
+                                             i, GridIndic, t, BetaCovInf,
+                                             EstBetaCovSus, EstBetaCovSusReInf, EstAlphaT) *
+            AV1(rndmef, GridIndic)
         }
       }
-      TA3[t]=sum(TA4)
     }
-    TInfA3=sum(TA3,na.rm=T)
-    TEndA3=TSusA1+TInfA3
-    ######################### Second Der...########################
-
-    TA5=rep(0,MaxTimePand)
+    KL2 <- apply(KL1, c(1,2), sum, na.rm = TRUE)
+    KL3 <- array(0, c(DimCovInf, 1, MaxTimePand))
     for(t in 1:MaxTimePand){
-      TA6=rep(0,NTotalpost)
       for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              IA5=c()
-              for(L in 1:NIterMC){
-                IA5[L]=mean3(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-              TA6[i]=-Pop[i]^2*as.numeric((SumH(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,alphaT))^2*mean(IA5))
-            }
-          }
+        GridIndic <- NLableGrid[i]
+        if(is_exposed(ExpoTime, IncPeriod, t, i)){
+          KL3[,,t] <- KL3[,,t] + Pop[i] * FN3(NLableGrid, Dist, EstAlphaS, delta,
+                                             i, GridIndic, t, BetaCovInf,
+                                             EstBetaCovSus, EstBetaCovSusReInf, EstAlphaT) *
+            mean(sapply(1:NIterMC, function(L)
+              AV2(NLableGrid, rndmef, Dist, alphaS, delta, lambda1,
+                    i, GridIndic, t, BetaCovInf, BetaCovSus,
+                    BetaCovSusReInf, alphaT, L)
+            ))
         }
       }
-      TA5[t]=sum(TA6)
     }
-    TInfA5=sum(TA5,na.rm=T)
-    TEndA5=TEndA3+TInfA5
-    EstAlphaT=alphaT-TEndA3/TEndA5
-
-
-
-    #################################BetaCovInf##################################
-
-
-    B1=array(0,c(DimCovInf,1,MaxTimePand))
+    KL4 <- apply(KL3, c(1,2), sum, na.rm = TRUE)
+    KL5 <- KL2 + KL4
+    KL6 <- array(0, c(DimCovInf, DimCovInf, MaxTimePand))
     for(t in 1:MaxTimePand){
-      B2=array(0,c(DimCovInf,1,NTotalpost))
       for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]>t|ExpoTime[i]==0){
-              B2[,,i]=-Pop[i]*SumW(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,EstAlphaT)*mean1(Pos,GridIndic)
-            }
-          }
+        GridIndic <- NLableGrid[i]
+        if(ExpoTime[i] > t | ExpoTime[i] == 0){
+          KL6[,,t] <- KL6[,,t] - Pop[i] * FN4(NLableGrid, Dist, EstAlphaS, delta,
+                                                   i, GridIndic, t, BetaCovInf,
+                                                   EstBetaCovSus, EstBetaCovSusReInf, EstAlphaT) *
+            as.numeric(AV1(rndmef, GridIndic))
         }
       }
-      B1[,,t]=apply(B2,c(1,2),sum,na.rm=T)
     }
-    SusB1=apply(B1,c(1,2),sum,na.rm=T)
-
-    ########################################################################
-
-    B3=array(0,c(DimCovInf,1,MaxTimePand))
+    KL7 <- apply(KL6, c(1,2), sum, na.rm = TRUE)
+    KL8 <- array(0, c(DimCovInf, DimCovInf, MaxTimePand))
     for(t in 1:MaxTimePand){
-      B4=array(0,c(DimCovInf,1,NTotalpost))
       for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              IAW4=c()
-              for(L in 1:NIterMC){
-                IAW4[L]=mean2(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-              B4[,,i]=Pop[i]*SumW(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,EstAlphaT)*as.numeric(mean(IAW4))
-            }
-          }
+        GridIndic <- NLableGrid[i]
+        if(is_exposed(ExpoTime, IncPeriod, t, i)){
+          KL8[,,t] <- KL8[,,t] + Pop[i] * FN4(NLableGrid, Dist, EstAlphaS, delta,
+                                                   i, GridIndic, t, BetaCovInf,
+                                                   EstBetaCovSus, EstBetaCovSusReInf, EstAlphaT) *
+            mean(sapply(1:NIterMC, function(L)
+              AV2(NLableGrid, rndmef, Dist, alphaS, delta, lambda1,
+                    i, GridIndic, t, BetaCovInf, BetaCovSus,
+                    BetaCovSusReInf, alphaT, L)
+            ))
         }
       }
-      B3[,,t]=apply(B4,c(1,2),sum,na.rm=T)
     }
-    InfB3=apply(B3,c(1,2),sum,na.rm=T)
-    EndB3=SusB1+InfB3
-    ######################### Second Der...########################
-
-    BB1=array(0,c(DimCovInf,DimCovInf,MaxTimePand))
+    KL9 <- apply(KL8, c(1,2), sum, na.rm = TRUE)
+    KL10 <- KL7 + KL9
+    KL11 <- array(0, c(DimCovInf, DimCovInf, MaxTimePand))
     for(t in 1:MaxTimePand){
-      BB2=array(0,c(DimCovInf,DimCovInf,NTotalpost))
       for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]>t|ExpoTime[i]==0){
-              BB2[,,i]=-Pop[i]*SumNewW1(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,EstAlphaT)*as.numeric(mean1(Pos,GridIndic))
-            }
-          }
+        GridIndic <- NLableGrid[i]
+        if(is_exposed(ExpoTime, IncPeriod, t, i)){
+          KL11[,,t] <- KL11[,,t] - Pop[i]^2 *
+            FN3(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t, BetaCovInf,
+                 EstBetaCovSus, EstBetaCovSusReInf, EstAlphaT) %*%
+            t(FN3(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t, BetaCovInf,
+                   EstBetaCovSus, EstBetaCovSusReInf, EstAlphaT)) *
+            mean(sapply(1:NIterMC, function(L)
+              AV3(NLableGrid, rndmef, Dist, alphaS, delta, lambda1,
+                    i, GridIndic, t, BetaCovInf, BetaCovSus,
+                    BetaCovSusReInf, alphaT, L)
+            ))
         }
       }
-      BB1[,,t]=apply(BB2,c(1,2),sum,na.rm=T)
     }
-    SusBB1=apply(BB1,c(1,2),sum,na.rm=T)
-
-
-    ########################################################################
-
-    BB3=array(0,c(DimCovInf,DimCovInf,MaxTimePand))
+    KL12 <- apply(KL11, c(1,2), sum, na.rm = TRUE)
+    KL13 <- KL10 + KL12
+    EstBetaCovInf <- BetaCovInf - solve(KL13) %*% KL5
+    KL15 <- sum(sapply(1:MaxTimePand, function(t) {
+      sum(sapply(1:NTotalpost, function(i) {
+        GridIndic <- NLableGrid[i]
+        if (ExpoTime[i] > t | ExpoTime[i] == 0) {
+          Pop[i] * as.numeric(
+            FN6(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+                     EstBetaCovInf, EstBetaCovSus, EstBetaCovSusReInf, EstAlphaT) *
+              AV1(rndmef, GridIndic)
+          )
+        } else 0
+      }), na.rm = TRUE)
+    }))
+    KL16 <- sum(sapply(1:MaxTimePand, function(t) {
+      sum(sapply(1:NTotalpost, function(i) {
+        GridIndic <- NLableGrid[i]
+        if (is_exposed(ExpoTime, IncPeriod, t, i)) {
+          -Pop[i] * as.numeric(
+            FN6(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+                     EstBetaCovInf, EstBetaCovSus, EstBetaCovSusReInf, EstAlphaT) *
+              mean(sapply(1:NIterMC, function(L)
+                AV2(NLableGrid, rndmef, Dist, alphaS, delta, lambda1, i, GridIndic,
+                      t, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT, L)
+              ))
+          )
+        } else 0
+      }))
+    }))
+    KL17 <- KL15 + KL16
+    KL18 <- sum(sapply(1:MaxTimePand, function(t) {
+      sum(sapply(1:NTotalpost, function(i) {
+        GridIndic <- NLableGrid[i]
+        if (ExpoTime[i] > t | ExpoTime[i] == 0) {
+          -Pop[i] * as.numeric(
+            FN7(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+                     EstBetaCovInf, EstBetaCovSus, EstBetaCovSusReInf, EstAlphaT) *
+              AV1(rndmef, GridIndic)
+          )
+        } else 0
+      }))
+    }))
+    KL19 <- rep(0, MaxTimePand)
     for(t in 1:MaxTimePand){
-      BB4=array(0,c(DimCovInf,DimCovInf,NTotalpost))
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              IAW5=c()
-              for(L in 1:NIterMC){
-                IAW5[L]=mean2(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-              BB4[,,i]=Pop[i]*SumNewW1(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,EstAlphaT)*as.numeric(mean(IAW5))
-            }
-          }
-        }
-      }
-      BB3[,,t]=apply(BB4,c(1,2),sum,na.rm=T)
+      KL19[t] <- sum(sapply(1:NTotalpost, function(i){
+        sum(sapply(1:NTotalGrid, function(GridIndic){
+          if(NLableGrid[i] == GridIndic && ExpoTime[i] <= t && (ExpoTime[i] + IncPeriod[i]) > t && ExpoTime[i] != 0){
+            Pop[i]*as.numeric(FN7(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+                                       EstBetaCovInf, EstBetaCovSus, EstBetaCovSusReInf, EstAlphaT) *
+                                mean(sapply(1:NIterMC, function(L)
+                                  AV2(NLableGrid, rndmef, Dist, alphaS, delta, lambda1, i, GridIndic, t,
+                                        BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT, L)))) -
+              Pop[i]^2*as.numeric((FN6(NLableGrid, Dist, EstAlphaS, delta, i, GridIndic, t,
+                                            EstBetaCovInf, EstBetaCovSus, EstBetaCovSusReInf, EstAlphaT))^2 *
+                                    mean(sapply(1:NIterMC, function(L)
+                                      AV3(NLableGrid, rndmef, Dist, alphaS, delta, lambda1, i, GridIndic, t,
+                                            BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT, L))))
+          } else 0
+        }))
+      }))
     }
-    InfBB3=apply(BB3,c(1,2),sum,na.rm=T)
-    EndBB3=SusBB1+InfBB3
-
-
-
-
-    B5=array(0,c(DimCovInf,DimCovInf,MaxTimePand))
-    for(t in 1:MaxTimePand){
-      B6=array(0,c(DimCovInf,DimCovInf,NTotalpost))
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              IAW6=c()
-              for(L in 1:NIterMC){
-                IAW6[L]=mean3(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-              B6[,,i]=-Pop[i]^2*SumW(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,EstAlphaT)%*%t(SumW(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,BetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,EstAlphaT))*as.numeric(mean(IAW6))
-            }
-          }
-        }
-      }
-      B5[,,t]=apply(B6,c(1,2),sum,na.rm=T)
+    KL20 <- sum(KL19, na.rm = TRUE)
+    KL21 <- KL18 + KL20
+    Estdelta <- delta - KL17 / KL21
+    LGLK1 <- function(par) {
+      lambda1 <- par[1]
+      tau1 <- par[2]
+      Sigma <- tau1^2 * (lambda1 * D + (1 - lambda1) * diag(NTotalGrid))
+      -mean(sapply(1:NIterMC, function(L) dmvnorm(rndmef[L,], rep(0, NTotalGrid), sigma = Sigma, log = TRUE)))
     }
-    InfB5=apply(B5,c(1,2),sum,na.rm=T)
-    EndB5=EndBB3+InfB5
-    EstBetaCovInf=BetaCovInf-solve(EndB5)%*%EndB3
-
-
-    ################################# Delta #############################
-
-
-    S8=rep(0,MaxTimePand)
-    for(t in 1:MaxTimePand){
-      S7=rep(0,NTotalpost)
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]>t|ExpoTime[i]==0){
-              S7[i]=Pop[i]*as.numeric(SumHnew1(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,EstBetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,EstAlphaT)*mean1(Pos,GridIndic))
-            }
-          }
-        }
-      }
-      S8[t]=sum(S7,na.rm=T)
-    }
-    SusNew8=sum(S8,na.rm=T)
-
-    ########################################################################
-
-    I10=rep(0,MaxTimePand)
-    for(t in 1:MaxTimePand){
-      I9=rep(0,NTotalpost)
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              ID1=c()
-              for(L in 1:NIterMC){
-                ID1[L]=mean2(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-              I9[i]=-Pop[i]*as.numeric(SumHnew1(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,EstBetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,EstAlphaT)*mean(ID1))
-            }
-          }
-        }
-      }
-      I10[t]=sum(I9)
-    }
-    InfeNew10=sum(I10,na.rm=T)
-    EndNew10=SusNew8+InfeNew10
-    ########################################################################
-    S10=rep(0,MaxTimePand)
-    for(t in 1:MaxTimePand){
-      S9=rep(0,NTotalpost)
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]>t|ExpoTime[i]==0){
-              S9[i]=-Pop[i]*as.numeric(SumHnew2(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,EstBetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,EstAlphaT)*mean1(Pos,GridIndic))
-            }
-          }
-        }
-      }
-      S10[t]=sum(S9)
-    }
-    SusNew10=sum(S10)
-
-    ########################################################################
-
-    I12=rep(0,MaxTimePand)
-    for(t in 1:MaxTimePand){
-      I11=rep(0,NTotalpost)
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if(NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              ID2=c()
-              for(L in 1:NIterMC){
-                ID2[L]=mean2(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-              ID3=c()
-              for(L in 1:NIterMC){
-                ID3[L]=mean3(NLableGrid,Pos,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-              I11[i]=Pop[i]*as.numeric(SumHnew2(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,EstBetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,EstAlphaT)*mean(ID2))-Pop[i]^2*as.numeric((SumHnew1(NLableGrid,Dist,EstAlphaS,delta,i,GridIndic,t,EstBetaCovInf,EstBetaCovSus,EstBetaCovSusReInf,EstAlphaT))^2*mean(ID3))
-            }
-          }
-        }
-      }
-      I12[t]=sum(I11)
-    }
-    InfeNew12=sum(I12,na.rm=T)
-    EndNew12=SusNew10+InfeNew12
-    Estdelta=delta-EndNew10/EndNew12
-
-
-    ##################################### Sigma_U #####################
-
-    Loglik1=function(par){
-      lambda1=par[[1]]
-      tau1=par[[2]]
-      Log1=c()
-      for(L in 1:NIterMC){
-        Log1[L]=dmvnorm(Pos[L,], rep(0,NTotalGrid), solve(tau1^2*(as.numeric(lambda1)*D+(1-as.numeric(lambda1))*I)), log = t)
-      }
-      LLL=-mean(Log1)
-    }
-
-    init=c(lambda1,tau1)
-    m1=optim(init,Loglik1)
-    EstU1=m1$par
-
-    EstGammau=EstU1[1]
-    HatSigmmaU=EstU1[2]
-
-
-    ##############################################
-
-    result=list(Pos=Pos,BetaCovInf=EstBetaCovInf,BetaCovSus=EstBetaCovSus,BetaCovSusReInf=EstBetaCovSusReInf,Uhat=EstU1,alphaS=EstAlphaS,alphaT=EstAlphaT,delta=Estdelta,tau1=HatSigmmaU,lambda1=EstGammau)
+    EstU1 <- optim(c(lambda1, tau1), fn = LGLK1)$par
+    EstGammau <- EstU1[1]
+    HatSigmmaU <- EstU1[2]
+    result=list(rndmef=rndmef,BetaCovInf=EstBetaCovInf,BetaCovSus=EstBetaCovSus,BetaCovSusReInf=EstBetaCovSusReInf,Uhat=EstU1,alphaS=EstAlphaS,alphaT=EstAlphaT,delta=Estdelta,tau1=HatSigmmaU,lambda1=EstGammau)
     result
   }
-
-
-
-  ########################################################################
-  ########################################################################
-  ########################################################################
-
   LA=numeric()
-  Loglik=function(NLableGrid,Pos1,Dist,alphaS,delta,lambda1,tau1,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT){
+  LLKH <- function(NLableGrid, rndmefEst, Dist, alphaS, delta, lambda1, tau1,
+                     BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) {
+    FNC1 <- sum(sapply(1:MaxTimePand, function(t) {
+      sum(sapply(1:NTotalpost, function(i) {
+        sum(sapply(1:NTotalGrid, function(GridIndic) {
+          if (NLableGrid[i] == GridIndic && (ExpoTime[i] > t || ExpoTime[i] == 0)) {
+            d1 <- mean(exp(rndmefEst[, GridIndic]))
+            -Pop[i] * FN1(NLableGrid, Dist, alphaS, delta, i, GridIndic, t,
+                           BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT) * d1
+          } else 0
+        }))
+      }))
+    }))
+    FNC2 <- sum(sapply(1:MaxTimePand, function(t) {
+      sum(sapply(1:NTotalpost, function(i) {
+        sum(sapply(1:NTotalGrid, function(GridIndic) {
+          if (NLableGrid[i] == GridIndic &&
+              ExpoTime[i] <= t && (ExpoTime[i] + IncPeriod[i]) > t && ExpoTime[i] != 0) {
+            mean(sapply(1:NIterMC, function(L) {
+              dx <- sum(sapply(1:NTotalpost, function(j) {
+                if (NewLabelGrid[j, GridIndic] != 0 &&
+                    InfTime[j] <= t && (InfTime[j] + InfPeriod[j]) >= t && InfTime[j] != 0) {
+                  NInf[j] * exp(alphaT + CovInf[j, ] %*% BetaCovInf) * Dist[i, j]^(-delta)
+                } else 0
+              }))
+              PROB <- 1 - exp(-Pop[i] * exp(alphaS + CovSus[GridIndic, ] %*% BetaCovSus +
+                                               CovSusReInf[GridIndic, ] %*% BetaCovSusReInf +
+                                               rndmefEst[L, GridIndic]) * dx)
+              ifelse(PROB == 0, 0, log(PROB))
+            }))
+          } else 0
+        }))
+      }))
+    }))
 
-    mean1L=function(Pos1,GridIndic){
-      d1=c()
-      for(L in 1:NIterMC){
-        d1[L]=exp(Pos1[L,GridIndic])
-      }
-      SMean1L=mean(d1)
-      return(SMean1L)
-    }
-
-    mean2L=function(NLableGrid,Pos1,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L){
-
-      dx1=rep(0,NTotalpost)
-      for(j in 1:NTotalpost){
-        if (NewLabelGrid[j,GridIndic]!=0){
-          if(InfTime[j]<=t & (InfTime[j]+InfPeriod[j])>=t & InfTime[j]!=0){
-            dx1[j]=NInf[j]*exp(alphaT+CovInf[j,]%*%BetaCovInf)*Dist[i,j]^(-delta)
-          }
-        }
-      }
-      dx1=replace(dx1,is.infinite(dx1),0)
-      dx=sum(dx1)
-      prob1=1-exp(-Pop[i]*exp(alphaS+CovSus[GridIndic,]%*%BetaCovSus+CovSusReInf[GridIndic,]%*%BetaCovSusReInf+Pos1[L,GridIndic])*dx)
-      if(prob1==0){SMean2L=0}
-      if(prob1!=0){
-        SMean2L=log(prob1)
-      }
-      return(SMean2L)
-    }
-
-    A1L=rep(0,MaxTimePand)
-    for(t in 1:MaxTimePand){
-      A2L=rep(0,NTotalpost)
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]>t|ExpoTime[i]==0){
-              A2L[i]=-Pop[i]*as.numeric(SumH(NLableGrid,Dist,alphaS,delta,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT)*mean1L(Pos1,GridIndic))
-            }
-          }
-        }
-      }
-      A1L[t]=sum(A2L)
-    }
-    SusA1L=sum(A1L)
-
-    A3L=rep(0,MaxTimePand)
-    for(t in 1:MaxTimePand){
-      A4L=rep(0,NTotalpost)
-      for(i in 1:NTotalpost){
-        for(GridIndic in 1:NTotalGrid){
-          if (NLableGrid[i]==GridIndic){
-            if(ExpoTime[i]<=t & (ExpoTime[i]+IncPeriod[i])>t & ExpoTime[i]!=0){
-              MM1=c()
-              for(L in 1:NIterMC){
-                MM1[L]=mean2L(NLableGrid,Pos1,Dist,alphaS,delta,lambda1,i,GridIndic,t,BetaCovInf,BetaCovSus,BetaCovSusReInf,alphaT,L)
-              }
-
-              A4L[i]=as.numeric(mean(MM1))
-            }
-          }
-        }
-      }
-      A3L[t]=sum(A4L)
-    }
-    INFA1=sum(A3L)
-
-    Log1=c()
-    for(L in 1:NIterMC){
-      Log1[L]=dmvnorm(Pos1[L,], rep(0,NTotalGrid), solve(tau1^2*(as.numeric(lambda1)*D+(1-as.numeric(lambda1))*I)), log = T)
-    }
-    LLL=mean(Log1)
-    LogLIK1=LLL+INFA1+SusA1L
-    return(LogLIK1)
+    FNC3 <- mean(sapply(1:NIterMC, function(L) {
+      dmvnorm(rndmefEst[L, ], rep(0, NTotalGrid),
+              sigma = tau1^2 * (lambda1 * D + (1 - lambda1) * diag(NTotalGrid)),
+              log = TRUE)
+    }))
+    FNC3 + FNC2 + FNC1
   }
-
-  ########################################################################
-  ########################################################################
-  ########################################################################
-
   est0=estfun(NLableGrid,Dist,alphaS0,delta0,lambda0,tau0,BetaCovInf0,BetaCovSus0,BetaCovSusReInf0,alphaT0)
   alphaS=est0$alphaS
-  alphaS
   delta=est0$delta
-  delta
   lambda1=est0$lambda1
-  lambda1
   tau1=est0$tau1
-  tau1
   BetaCovInf=est0$BetaCovInf
-  BetaCovInf
   BetaCovSus=est0$BetaCovSus
-  BetaCovSus
   BetaCovSusReInf=est0$BetaCovSusReInf
-  BetaCovSusReInf
   alphaT=est0$alphaT
-  alphaT
   Uhat=est0$Uhat
-  Uhat
-  Pos1=est0$Pos
-  Pos1
-
-
-  ########################################################################
-  ########################################################################
-  ########################################################################
-  E1 <- list()
+  rndmefEst=est0$rndmef
+  rndmefEst
   AIC <- numeric()
   mes <- numeric()
-
   tolerance <- 0.1
-
-
-  for (ss in 1:NIterMCECM) {
-
-    est <- estfun(NLableGrid, Dist, alphaS, delta, lambda1, tau1, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)
-
-    alphaS <- est$alphaS
-    BetaCovInf <- est$BetaCovInf
-    BetaCovSus <- est$BetaCovSus
-    BetaCovSusReInf <- est$BetaCovSusReInf
-    delta <- est$delta
-    lambda1 <- est$lambda1
-    tau1 <- est$tau1
-    alphaT <- est$alphaT
-    Uhat <- est$Uhat
-    Pos <- est$Pos
-
-    LA[ss] <- Loglik(NLableGrid, Pos, Dist, alphaS, delta, lambda1, tau1, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)
-
-    AIC[ss] <- -2 * LA[ss] + 11
-
-    out1 <- list(
-      alphaS = alphaS,
-      BetaCovInf = BetaCovInf,
-      BetaCovSus = BetaCovSus,
-      BetaCovSusReInf = BetaCovSusReInf,
-      alphaT = alphaT,
-      delta = delta,
-      tau1 = tau1,
-      lambda1 = lambda1,
-      AIC = AIC[ss]
-    )
-
-    E1[[ss]] <- c(alphaS, BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT, delta, tau1, lambda1)
-
-    if (ss > 1) {
-      mes[ss] <- sqrt(sum((E1[[ss]] - E1[[ss-1]])^2))
-    } else {
-      mes[ss] <- Inf
-    }
-
-    if (mes[ss] < tolerance) {
-      message("MCECM Converged at iteration ", ss, " with parameter change: ", mes[ss])
+  for (NMB in 1:NIterMCECM) {
+    est <- estfun(NLableGrid, Dist, alphaS, delta, lambda1, tau1,
+                  BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)
+    list2env(est, envir = environment())
+    LA[NMB] <- LLKH(NLableGrid, rndmef, Dist, alphaS, delta, lambda1, tau1,
+                     BetaCovInf, BetaCovSus, BetaCovSusReInf, alphaT)
+    AIC[NMB] <- -2 * LA[NMB] + 11
+    current_params <- c(alphaS, BetaCovInf, BetaCovSus, BetaCovSusReInf,
+                        alphaT, delta, tau1, lambda1)
+    mes <- if(NMB > 1) sqrt(sum((current_params - prev_params)^2)) else Inf
+    prev_params <- current_params
+    if(mes < tolerance) {
+      message("MCECM Converged at iteration ", NMB, " with parameter change: ", mes)
       break
     }
-
-    if (ss %% 10 == 0) {
-      message("Iteration ", ss, ": Parameter change = ", mes[ss])
-    }
+    if(NMB %% 10 == 0) message("Iteration ", NMB, ": Parameter change = ", mes)
   }
-
+  out1 <- list(
+    alphaS = alphaS,
+    BetaCovInf = BetaCovInf,
+    BetaCovSus = BetaCovSus,
+    BetaCovSusReInf = BetaCovSusReInf,
+    alphaT = alphaT,
+    delta = delta,
+    tau1 = tau1,
+    lambda1 = lambda1,
+    AIC = AIC[NMB]
+  )
   out1
-
 }
-
