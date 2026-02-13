@@ -516,10 +516,10 @@ GDILM_SEIRS_Sim_Par_Est=function(GridDim1,GridDim2,NPostPerGrid,MaxTimePand,tau0
       S36[,,t] <- apply(S37, c(1,2), sum, na.rm = TRUE)
     }
     S39 <- apply(S36, c(1,2), sum, na.rm = TRUE)
-    S40 <- S31 + S35 + S39 + 0.01
+    S40 <- S31 + S35 + S39 + 0.1
     epsilon <- 1e-3
     if(det(S40) < epsilon){
-      S40 <- S40 + diag(epsilon, nrow(S40))
+      S40 <- S40 + diag(epsilon, nrow(S40))+0.5
     }
     EstBetaCovSusReInf <- BetaCovSusReInf - solve(S40) %*% S28
     contrib_time <- function(i, t) {
